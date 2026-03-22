@@ -207,6 +207,9 @@ struct MockLimitEnforcer final: public LimitEnforcer {
   kj::Duration consumeTimeElapsedForPeriodicLogging() override {
     return 0 * kj::SECONDS;
   }
+  size_t getSqliteMemoryUsage() const override {
+    return 0;
+  }
 };
 
 struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {

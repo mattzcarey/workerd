@@ -129,6 +129,7 @@ class LimitEnforcer {
   // not be called while in a JS scope, i.e. when `enterJs()` has been called and the returned
   // object not yet dropped.
   virtual void topUpActor() = 0;
+
   // TODO(cleanup): This is called in WebSocket and JsRpcTargetBase when receiving an event, but
   // should we do something more generic like use a membrane to detect any incoming RPC call?
 
@@ -175,6 +176,7 @@ class LimitEnforcer {
   // Returns a promise that will reject if and when a limit is exceeded that prevents further
   // JavaScript execution, such as the CPU or memory limit.
   virtual kj::Promise<void> onLimitsExceeded() = 0;
+
   // Sets a callback to call when the cpu limit is nearly exceeded. The callback must be signal safe
   // and cannot take the isolate lock.
   virtual void setCpuLimitNearlyExceededCallback(kj::Function<void(void)>) = 0;
@@ -188,6 +190,10 @@ class LimitEnforcer {
 
   // Only used downstream for internal metrics.
   virtual kj::Duration consumeTimeElapsedForPeriodicLogging() = 0;
+
+  // Returns the last snapshotted SQLite memory usage for the current actor, in bytes. Returns 0
+  // for non-actor isolates.
+  virtual size_t getSqliteMemoryUsage() const = 0;
 };
 
 }  // namespace workerd
