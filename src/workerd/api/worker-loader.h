@@ -21,8 +21,9 @@ class WorkerStub: public jsg::Object {
 
   struct EntrypointOptions {
     jsg::Optional<jsg::JsRef<jsg::JsObject>> props;
+    jsg::Optional<ResourceLimits> limits;
 
-    JSG_STRUCT(props);
+    JSG_STRUCT(props, limits);
   };
 
   jsg::Ref<Fetcher> getEntrypoint(jsg::Lock& js,
@@ -90,6 +91,8 @@ class WorkerLoader: public jsg::Object {
     jsg::Optional<kj::Array<kj::String>> compatibilityFlags;
     jsg::Optional<bool> allowExperimental = false;
 
+    jsg::Optional<ResourceLimits> limits;
+
     kj::String mainModule;
 
     // Modules are specified as an object mapping names to content. If the content is just a
@@ -116,6 +119,7 @@ class WorkerLoader: public jsg::Object {
     JSG_STRUCT(compatibilityDate,
         compatibilityFlags,
         allowExperimental,
+        limits,
         mainModule,
         modules,
         env,
@@ -156,6 +160,6 @@ class WorkerLoader: public jsg::Object {
 
 #define EW_WORKER_LOADER_ISOLATE_TYPES                                                             \
   api::WorkerStub, api::WorkerStub::EntrypointOptions, api::WorkerLoader,                          \
-      api::WorkerLoader::Module, api::WorkerLoader::WorkerCode
+      api::WorkerLoader::Module, api::WorkerLoader::WorkerCode, workerd::ResourceLimits
 
 }  // namespace workerd::api

@@ -4291,6 +4291,7 @@ interface WorkerStub {
 }
 interface WorkerStubEntrypointOptions {
   props?: any;
+  limits?: workerdResourceLimits;
 }
 interface WorkerLoader {
   get(
@@ -4312,12 +4313,17 @@ interface WorkerLoaderWorkerCode {
   compatibilityDate: string;
   compatibilityFlags?: string[];
   allowExperimental?: boolean;
+  limits?: workerdResourceLimits;
   mainModule: string;
   modules: Record<string, WorkerLoaderModule | string>;
   env?: any;
   globalOutbound?: Fetcher | null;
   tails?: Fetcher[];
   streamingTails?: Fetcher[];
+}
+interface workerdResourceLimits {
+  cpuMs?: number;
+  subRequests?: number;
 }
 /**
  * The Workers runtime supports a subset of the Performance API, used to measure timing and performance,
