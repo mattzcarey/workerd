@@ -5,7 +5,6 @@
 #include "actor-sqlite.h"
 #include "io-gate.h"
 
-#include <workerd/util/autogate.h>
 #include <workerd/util/capnp-mock.h>
 #include <workerd/util/test.h>
 
@@ -194,10 +193,6 @@ KJ_TEST("can set and get alarm") {
 
 KJ_TEST("check put multiple wraps operations in a transaction") {
   ActorSqliteTest test;
-
-  // Let's deinit the autogate. This will enforce the old behavior where putMultiple would commit
-  // some puts, until a single put failed.
-  util::Autogate::deinitAutogate();
 
   kj::Vector<ActorCache::KeyValuePair> putKVs;
   putKVs.add(ActorCache::KeyValuePair{kj::str("foo"), kj::heapArray(kj::str("bar").asBytes())});
@@ -2897,6 +2892,153 @@ KJ_TEST("explicit transaction: commit failure breaks output gate even for unconf
 
   // Gate should now be broken due to commit failure, even though write was unconfirmed
   KJ_EXPECT_THROW_MESSAGE("commit failed", promise.wait(test.ws));
+}
+
+KJ_TEST("ActorSqlite alarm cleared by abandonAlarm after max counted retry failures") {
+
+  ActorSqliteTest test;
+
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  // Simulate ALARM_RETRY_MAX_TRIES (= 6) counted handler failures.
+  for (auto i = 0; i < 6 /* WorkerInterface::ALARM_RETRY_MAX_TRIES */; i++) {
+    auto armResult = test.actor.armAlarmHandler(oneMs, nullptr, testCurrentTime);
+    KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
+    test.actor.cancelDeferredAlarmDeletion();
+    // Each failure leaves alarm in SQLite (correct for retries 1-5).
+    test.pollAndExpectCalls({});
+  }
+
+  // The alarm scheduler has decided to give up. It calls abandonAlarm() on the actor:
+  // setAlarm(null) -> commit -> scheduleRun(none) (move-later path).
+  auto result = test.actor.abandonAlarm(oneMs).wait(test.ws);
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  // Returns kj::none: alarm was cleared, AlarmManager should not re-register.
+  KJ_ASSERT(result == kj::none);
+
+  // getAlarm() now returns null (alarm deleted from SQLite).
+  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+}
+
+KJ_TEST("ActorSqlite alarm preserved after ALARM_RETRY_MAX_TRIES uncounted (internal) failures") {
+  // When all ALARM_RETRY_MAX_TRIES failures are uncounted (retryCountsAgainstLimit=false,
+  // i.e. infrastructure errors), the alarm scheduler's countedRetry never reaches the limit and
+  // abandonAlarm is NEVER called.  The alarm must remain set in SQLite throughout so that
+  // the scheduler can keep retrying indefinitely.
+
+  ActorSqliteTest test;
+
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  // Simulate uncounted failures well past ALARM_RETRY_MAX_TRIES (= 6).
+  // countedRetry stays at 0; AlarmManager never gives up; abandonAlarm is never called.
+  // We've seen alarms fail hundreds of times due to infrastructure errors in production,
+  // so we check both at the boundary (6) and well beyond it (100).
+  for (auto i = 0; i < 100; i++) {
+    auto armResult = test.actor.armAlarmHandler(oneMs, nullptr, testCurrentTime);
+    KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
+    test.actor.cancelDeferredAlarmDeletion();
+    test.pollAndExpectCalls({});
+
+    // Check at the ALARM_RETRY_MAX_TRIES boundary and at the end.
+    if (i == 5 || i == 99) {
+      KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+    }
+  }
+}
+
+KJ_TEST("ActorSqlite abandonAlarm is a no-op when a newer alarm has replaced the abandoned one") {
+  // If the user sets a new alarm between the last retry failure and the abandonAlarm() call,
+  // and it has already committed to SQLite, abandonAlarm() must compare the time and leave
+  // the new alarm untouched.
+
+  ActorSqliteTest test;
+
+  // Set the original alarm and commit it.
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  // Simulate ALARM_RETRY_MAX_TRIES (= 6) counted failures.
+  for (auto i = 0; i < 6 /* WorkerInterface::ALARM_RETRY_MAX_TRIES */; i++) {
+    auto armResult = test.actor.armAlarmHandler(oneMs, nullptr, testCurrentTime);
+    KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
+    test.actor.cancelDeferredAlarmDeletion();
+    test.pollAndExpectCalls({});
+  }
+
+  // Race: user sets a new alarm (twoMs) between the last failure and abandonAlarm().
+  // The commit fires first; then the post-commit "move-later" logic fires scheduleRun(2ms)
+  // because alarmScheduledNoLaterThan (oneMs) is earlier than the newly committed twoMs.
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
+
+  // abandonAlarm() for the original oneMs alarm must be a no-op: storedTime (twoMs) !=
+  // scheduledTime (oneMs), so the time check prevents clearing the new alarm.
+  // Returns twoMs so AlarmManager can re-register the actor's real alarm.
+  auto result = test.actor.abandonAlarm(oneMs).wait(test.ws);
+  test.pollAndExpectCalls({});  // No commit or scheduleRun -- correct no-op.
+
+  KJ_ASSERT(KJ_ASSERT_NONNULL(result) == twoMs);
+
+  // getAlarm() must still return twoMs.
+  KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
+}
+
+KJ_TEST("ActorSqlite abandonAlarm returns kj::none when no alarm is stored") {
+  ActorSqliteTest test;
+
+  // No alarm ever set. abandonAlarm should be a pure no-op, returning kj::none.
+  auto result = test.actor.abandonAlarm(oneMs).wait(test.ws);
+  test.pollAndExpectCalls({});
+
+  KJ_ASSERT(result == kj::none);
+}
+
+KJ_TEST("ActorSqlite abandonAlarm returns kj::none when inAlarmHandler") {
+  ActorSqliteTest test;
+
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  // Arm the handler — inAlarmHandler is now true.
+  auto armResult = test.actor.armAlarmHandler(oneMs, nullptr, testCurrentTime);
+  KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
+
+  // abandonAlarm while handler is running: returns kj::none (handler owns the alarm).
+  auto result = test.actor.abandonAlarm(oneMs).wait(test.ws);
+  test.pollAndExpectCalls({});
+
+  KJ_ASSERT(result == kj::none);
+
+  // kj::none because haveDeferredDelete hides the alarm during the handler.
+  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+
+  // Cancel the deferred delete so cleanup doesn't trigger a commit.
+  test.actor.cancelDeferredAlarmDeletion();
+
+  // After cancellation, getAlarm() reads SQLite again -- oneMs is still there since
+  // abandonAlarm was a no-op while the handler was running.
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 }
 
 }  // namespace
