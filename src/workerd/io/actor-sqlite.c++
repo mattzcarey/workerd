@@ -7,7 +7,6 @@
 #include "io-gate.h"
 
 #include <workerd/jsg/exception.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 
 #include <kj/exception.h>
@@ -1004,6 +1003,29 @@ void ActorSqlite::cancelDeferredAlarmDeletion() {
     LOG_WARNING_ONCE("expected to be in alarm handler when trying to cancel deleted alarm");
   }
   haveDeferredDelete = false;
+}
+
+kj::Promise<kj::Maybe<kj::Date>> ActorSqlite::abandonAlarm(kj::Date scheduledTime) {
+  // Called when AlarmManager has given up retrying an alarm after too many counted failures.
+  // Clear the alarm from SQLite so getAlarm() returns null instead of a stale time.
+  // Only clear if SQLite currently has the exact alarm being abandoned and we're not mid-handler.
+  // The time check guards against the race where the user set a new alarm (which always has a
+  // time >= now() > scheduledTime due to past-time clamping in setAlarm) before this call arrived.
+  if (inAlarmHandler) {
+    // Shouldn't happen -- AlarmManager shouldn't call abandonAlarm while a handler is running.
+    LOG_WARNING_ONCE("abandonAlarm called while alarm handler is still running");
+    return kj::Maybe<kj::Date>(kj::none);
+  }
+  KJ_IF_SOME(storedTime, metadata.getAlarm()) {
+    if (storedTime == scheduledTime) {
+      setAlarm(kj::none, {}, nullptr);
+      return kj::Maybe<kj::Date>(kj::none);
+    } else {
+      // The user set a different alarm. Return it so AlarmManager can re-register.
+      return kj::Maybe<kj::Date>(storedTime);
+    }
+  }
+  return kj::Maybe<kj::Date>(kj::none);
 }
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush(SpanParent parentSpan) {
