@@ -75,6 +75,7 @@ class WorkerEntrypoint final: public WorkerInterface {
   kj::Promise<void> prewarm(kj::StringPtr url) override;
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override;
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override;
   kj::Promise<bool> test() override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
 
@@ -843,6 +844,20 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarm(
     t.setReturn(context.now());
   }
   co_return result;
+}
+
+kj::Promise<kj::Maybe<kj::Date>> WorkerEntrypoint::abandonAlarm(kj::Date scheduledTime) {
+  TRACE_EVENT("workerd", "WorkerEntrypoint::abandonAlarm()");
+  // This does not require running the user's alarm handler -- it's a pure actor-state cleanup.
+  // Access the actor directly from the IoContext without going through the JS dispatch machinery.
+  KJ_IF_SOME(req, incomingRequest) {
+    auto& actor = KJ_REQUIRE_NONNULL(
+        req->getContext().getActor(), "abandonAlarm() should only work with actors");
+    KJ_IF_SOME(persistent, actor.getPersistent()) {
+      return persistent.abandonAlarm(scheduledTime);
+    }
+  }
+  return kj::Maybe<kj::Date>(kj::none);
 }
 
 kj::Promise<bool> WorkerEntrypoint::test() {
