@@ -210,6 +210,27 @@ void ActorCache::cancelDeferredAlarmDeletion() {
   }
 }
 
+kj::Promise<kj::Maybe<kj::Date>> ActorCache::abandonAlarm(kj::Date scheduledTime) {
+  // Called when AlarmManager has given up retrying an alarm after too many counted failures.
+  // Clear the in-memory alarm state so getAlarm() returns null instead of a stale time.
+  // Only clear if we still have a stale KnownAlarmTime whose time matches the abandoned alarm.
+  KJ_IF_SOME(t, currentAlarmTime.tryGet<KnownAlarmTime>()) {
+    KJ_IF_SOME(storedTime, t.time) {
+      if (t.status == KnownAlarmTime::Status::CLEAN) {
+        if (storedTime == scheduledTime) {
+          currentAlarmTime = KnownAlarmTime{
+            .status = KnownAlarmTime::Status::CLEAN, .time = kj::none, .noCache = t.noCache};
+          return kj::Maybe<kj::Date>(kj::none);
+        } else {
+          // The user set a different alarm. Return it so AlarmManager can re-register.
+          return kj::Maybe<kj::Date>(storedTime);
+        }
+      }
+    }
+  }
+  return kj::Maybe<kj::Date>(kj::none);
+}
+
 kj::Maybe<kj::Promise<void>> ActorCache::getBackpressure() {
   if (dirtyList.sizeInBytes() > lru.options.dirtyListByteLimit && !lru.options.neverFlush) {
     // Wait for dirty entries to be flushed.
