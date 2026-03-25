@@ -228,6 +228,14 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
     if (retryInfo.retry) {
       // recreate the task, running after a delay determined using the retry factor
       if (entry.value.countedRetry >= AlarmScheduler::RETRY_MAX_TRIES) {
+        // Notify the actor to clear its in-memory alarm state so getAlarm() reflects the
+        // deletion. We ignore the returned remaining time — the workerd-local alarm scheduler
+        // already has visibility into the actor's alarm state via its SQLite hooks.
+        co_await getActor(kj::str(actorRef.actorId))
+            ->abandonAlarm(scheduledTime)
+            .ignoreResult()
+            .catch_(
+                [](kj::Exception&& e) { KJ_LOG(WARNING, "abandonAlarm notification failed", e); });
         deleteAlarm(*entry.value.actor);
         co_return;
       }
