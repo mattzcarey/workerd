@@ -65,6 +65,10 @@ class AlarmScheduler final: kj::TaskSet::ErrorHandler {
   bool setAlarm(ActorKey actor, kj::Date scheduledTime);
   bool deleteAlarm(ActorKey actor);
 
+  // Cancels all pending alarms and removes them from persistent storage. Used by
+  // deleteAllDurableObjects() to wipe all alarm state for a namespace.
+  void deleteAll();
+
  private:
   enum class AlarmStatus { WAITING, STARTED, FINISHED };
   const kj::Clock& clock;

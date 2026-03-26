@@ -100,12 +100,19 @@ class UnsafeModule: public jsg::Object {
   UnsafeModule(jsg::Lock&, const jsg::Url&) {}
   jsg::Promise<void> abortAllDurableObjects(jsg::Lock& js);
 
+  // Like abortAllDurableObjects(), but also deletes all underlying storage (SQLite files on disk)
+  // and cancels all scheduled alarms. After calling this, DOs can be recreated with clean state.
+  // Useful for test isolation between test cases without restarting the workerd process.
+  // Like abortAllDurableObjects(), namespaces with preventEviction are not affected.
+  jsg::Promise<void> deleteAllDurableObjects(jsg::Lock& js);
+
   // Returns true if the TEST_WORKERD autogate is enabled.
   // This is used to verify that the all-autogates test variant is working correctly.
   bool isTestAutogateEnabled();
 
   JSG_RESOURCE_TYPE(UnsafeModule) {
     JSG_METHOD(abortAllDurableObjects);
+    JSG_METHOD(deleteAllDurableObjects);
     JSG_METHOD(isTestAutogateEnabled);
   }
 };
