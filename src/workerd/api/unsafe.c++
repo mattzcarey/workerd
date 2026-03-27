@@ -207,8 +207,7 @@ jsg::Promise<void> UnsafeModule::abortAllDurableObjects(jsg::Lock& js) {
 jsg::Promise<void> UnsafeModule::deleteAllDurableObjects(jsg::Lock& js) {
   auto& context = IoContext::current();
 
-  auto exception =
-      JSG_KJ_EXCEPTION(FAILED, Error, "Application called deleteAllDurableObjects().");
+  auto exception = JSG_KJ_EXCEPTION(FAILED, Error, "Application called deleteAllDurableObjects().");
   context.deleteAllActors(exception);
 
   return js.resolvedPromise();
