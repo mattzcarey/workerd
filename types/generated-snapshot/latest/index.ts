@@ -481,6 +481,7 @@ export interface ExecutionContext<Props = unknown> {
   passThroughOnException(): void;
   readonly exports: Cloudflare.Exports;
   readonly props: Props;
+  cache: CacheContext | null;
 }
 export type ExportedHandlerFetchHandler<
   Env = unknown,
@@ -563,6 +564,24 @@ export interface AlarmInvocationInfo {
 }
 export interface Cloudflare {
   readonly compatibilityFlags: Record<string, boolean>;
+}
+export interface CachePurgeError {
+  code: number;
+  message: string;
+}
+export interface CachePurgeResult {
+  success: boolean;
+  zoneTag: string;
+  errors: CachePurgeError[];
+}
+export interface CachePurgeOptions {
+  tags?: string[];
+  hosts?: string[];
+  prefixes?: string[];
+  purge_everything?: boolean;
+}
+export interface CacheContext {
+  purge(options: CachePurgeOptions): Promise<CachePurgeResult>;
 }
 export interface DurableObject {
   fetch(request: Request): Response | Promise<Response>;
