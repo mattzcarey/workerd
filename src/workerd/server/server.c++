@@ -2982,15 +2982,19 @@ class Server::WorkerService final: public Service,
       // Abort all running actors so they release their file handles.
       abortAll(reason);
 
-      // Cancel all pending alarms (in-memory tasks + persistent DB).
+      // Cancel all pending alarms (in-memory tasks + persistent DB rows).
       KJ_IF_SOME(scheduler, ownAlarmScheduler) {
         scheduler->deleteAll();
       }
 
-      // Delete all on-disk actor storage files.
+      // Delete per-actor storage files from disk. Skip metadata.sqlite (and its WAL/journal
+      // companions) because the AlarmScheduler still has it open — its rows were already
+      // wiped by deleteAll() above.
       KJ_IF_SOME(as, actorStorage) {
         for (auto& entry: as.directory->listNames()) {
-          as.directory->remove(kj::Path({entry}));
+          if (!entry.startsWith("metadata.sqlite")) {
+            as.directory->remove(kj::Path({entry}));
+          }
         }
       }
     }
