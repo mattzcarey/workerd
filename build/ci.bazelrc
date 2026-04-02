@@ -88,12 +88,15 @@ test:ci-macOS --spawn_strategy=local
 build:ci-windows --config=release_windows
 build:ci-windows-debug --config=debug
 
+build:ci-windows-arm64 --config=release_windows_arm64
+
 # Some tests (like Python import tests) take a long time to run, especially when debug is enabled
 # For that reason, we only run them in the default configuration for each platform to minimize
 # effect on CI pipeline runtime.
 test:ci-linux --test_size_filters=
 test:ci-macOS --test_size_filters=
 test:ci-windows --test_size_filters=
+test:ci-windows-arm64 --test_size_filters=
 
 # Run container tests on Linux CI
 test:ci-linux --test_tag_filters=-off-by-default,-requires-fuzzilli
