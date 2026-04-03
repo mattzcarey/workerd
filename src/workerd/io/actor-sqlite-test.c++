@@ -99,7 +99,10 @@ struct ActorSqliteTest final {
       : ws(loop),
         vfsDir(kj::newInMemoryDirectory(kj::nullClock())),
         vfs(*vfsDir),
-        db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY),
+        db(vfs,
+            kj::Path({"foo"}),
+            kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+            /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024),
         actor(kj::attachRef(db), gate, KJ_BIND_METHOD(*this, commitCallback), hooks),
         gateBrokenPromise(options.monitorOutputGate ? eagerlyReportExceptions(gate.onBroken())
                                                     : kj::Promise<void>(kj::READY_NOW)) {

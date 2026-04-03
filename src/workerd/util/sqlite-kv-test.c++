@@ -9,6 +9,14 @@
 namespace workerd {
 namespace {
 
+struct GlobalInit {
+  GlobalInit() {
+    installSqliteCustomAllocator();
+  }
+};
+
+static GlobalInit init;
+
 KJ_TEST("SQLite-KV") {
   class TestSqliteObserver: public SqliteObserver {
    public:
@@ -24,8 +32,8 @@ KJ_TEST("SQLite-KV") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
   TestSqliteObserver sqliteObserver;
-  SqliteDatabase db(
-      vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY, sqliteObserver);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024, sqliteObserver);
   SqliteKv kv(db);
 
   kv.put("foo", "abc"_kj.asBytes());
@@ -139,7 +147,8 @@ KJ_TEST("SQLite-KV") {
 KJ_TEST("large key") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
-  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
   SqliteKv kv(db);
 
   // 2MB because we document a 2MB limit for SQLite Durable Objects
@@ -168,8 +177,8 @@ KJ_TEST("SQLite-KV multi-put") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
   TestSqliteObserver sqliteObserver;
-  SqliteDatabase db(
-      vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY, sqliteObserver);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024, sqliteObserver);
   SqliteKv kv(db);
 
   // Test basic multi-put with a simple struct
@@ -254,7 +263,8 @@ KJ_TEST("SQLite-KV multi-put") {
 KJ_TEST("SQLite-KV multi-put rollback on error") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
-  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
   SqliteKv kv(db);
 
   // Pre-populate with some data
@@ -299,7 +309,8 @@ KJ_TEST("SQLite-KV multi-put rollback on error") {
 KJ_TEST("SQLite-KV multi-put with allowUnconfirmed") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
-  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
   SqliteKv kv(db);
 
   struct KeyValue {

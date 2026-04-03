@@ -9,10 +9,19 @@
 namespace workerd {
 namespace {
 
+struct GlobalInit {
+  GlobalInit() {
+    installSqliteCustomAllocator();
+  }
+};
+
+static GlobalInit init;
+
 KJ_TEST("SQLite-METADATA") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
-  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
   SqliteMetadata metadata(db);
 
   // Initial state has empty alarm

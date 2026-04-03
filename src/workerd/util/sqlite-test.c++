@@ -24,6 +24,14 @@
 namespace workerd {
 namespace {
 
+struct GlobalInit {
+  GlobalInit() {
+    installSqliteCustomAllocator();
+  }
+};
+
+static GlobalInit init;
+
 // Initialize the database with some data.
 void setupSql(SqliteDatabase& db) {
   // TODO(sqlite): Do this automatically and don't permit it via run().
@@ -101,7 +109,8 @@ KJ_TEST("SQLite backed by in-memory directory") {
   SqliteDatabase::Vfs vfs(*dir);
 
   {
-    SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+    SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+        /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
     setupSql(db);
     checkSql(db);
@@ -122,7 +131,8 @@ KJ_TEST("SQLite backed by in-memory directory") {
 
   // Open it again and make sure the data is still there!
   {
-    SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
+    SqliteDatabase db(
+        vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY, /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
     checkSql(db);
   }
@@ -187,7 +197,8 @@ KJ_TEST("SQLite backed by real disk") {
   SqliteDatabase::Vfs vfs(*dir);
 
   {
-    SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+    SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+        /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
     setupSql(db);
     checkSql(db);
@@ -209,14 +220,16 @@ KJ_TEST("SQLite backed by real disk") {
 
   // Open it again and make sure the data is still there!
   {
-    SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
+    SqliteDatabase db(
+        vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY, /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
     checkSql(db);
   }
 
   // Check read-only-mode.
   {
-    SqliteDatabase db(vfs, kj::Path({"foo"}));
+    SqliteDatabase db(
+        vfs, kj::Path({"foo"}), /*maybeMode=*/kj::none, /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
     checkSql(db);
     KJ_EXPECT_THROW_MESSAGE("attempt to write a readonly database",
@@ -230,12 +243,14 @@ KJ_TEST("SQLite backed by real disk") {
 void doReadOnlyUpdateTest(const kj::Directory& dir) {
   SqliteDatabase::Vfs vfs(dir);
 
-  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
   setupSql(db);
   checkSql(db);
 
-  SqliteDatabase rodb(vfs, kj::Path({"foo"}));
+  SqliteDatabase rodb(
+      vfs, kj::Path({"foo"}), /*maybeMode=*/kj::none, /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
   checkSql(rodb);
 
   uint64_t startWalSize = 0;
@@ -284,7 +299,8 @@ KJ_TEST("In-memory read-only crash regression") {
   SqliteDatabase::Vfs vfs(*dir);
 
   {
-    SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+    SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+        /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
     setupSql(db);
     checkSql(db);
   }
@@ -296,7 +312,8 @@ KJ_TEST("In-memory read-only crash regression") {
 
   // then create a read/write database
   kj::Maybe<SqliteDatabase> db;
-  db.emplace(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  db.emplace(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
   checkSql(KJ_ASSERT_NONNULL(db));
 
   // then write into the read/write database:
@@ -317,7 +334,8 @@ void doLockTest(bool walMode) {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
 
-  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
   if (walMode) {
     db.run("PRAGMA journal_mode=WAL;");
@@ -342,7 +360,8 @@ void doLockTest(bool walMode) {
   // immediately.
   // NOLINTNEXTLINE(bugprone-unused-raii)
   kj::Thread([&vfs = vfs]() noexcept {
-    SqliteDatabase db2(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
+    SqliteDatabase db2(
+        vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY, /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
     KJ_EXPECT(db2.run(GET_COUNT).getInt(0) == 1);
     db2.run(INCREMENT);
     KJ_EXPECT(db2.run(GET_COUNT).getInt(0) == 2);
@@ -358,7 +377,8 @@ void doLockTest(bool walMode) {
     // a conflict.
     kj::Thread thread([&vfs = vfs, &stop, &counter]() noexcept {
       KJ_DEFER(stop.store(true, std::memory_order_relaxed););
-      SqliteDatabase db2(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
+      SqliteDatabase db2(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY,
+          /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
       while (!stop.load(std::memory_order_relaxed)) {
         KJ_IF_SOME(e, kj::runCatchingExceptions([&]() {
           db2.run(INCREMENT);
@@ -400,7 +420,8 @@ KJ_TEST("SQLite locks: WAL mode") {
 KJ_TEST("SQLite Regulator") {
   TempDirOnDisk dir;
   SqliteDatabase::Vfs vfs(*dir);
-  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
   class RegulatorImpl: public SqliteDatabase::Regulator {
    public:
@@ -453,7 +474,8 @@ KJ_TEST("SQLite Regulator") {
 KJ_TEST("SQLite onWrite callback") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
-  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
   bool sawWrite = false;
   db.onWrite([&](bool allowUnconfirmed) { sawWrite = true; });
@@ -506,7 +528,8 @@ RowCounts countRowsTouched(SqliteDatabase& db, kj::StringPtr sqlCode, Params... 
 KJ_TEST("SQLite read row counters (basic)") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
-  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
   db.run(R"(
     CREATE TABLE things (
@@ -590,7 +613,8 @@ KJ_TEST("SQLite read row counters (basic)") {
 KJ_TEST("SQLite write row counters (basic)") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
-  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
   db.run(R"(
     CREATE TABLE things (
@@ -681,7 +705,8 @@ KJ_TEST("SQLite read/write row counters (large row insert)") {
 
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
-  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
   db.run("CREATE TABLE large_things (id INTEGER PRIMARY KEY, large_value TEXT)");
 
@@ -712,7 +737,8 @@ KJ_TEST("SQLite read/write row counters (large row insert)") {
 KJ_TEST("SQLite row counters with triggers") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
-  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
   class RegulatorImpl: public SqliteDatabase::Regulator {
    public:
@@ -768,7 +794,8 @@ KJ_TEST("SQLite row counters with triggers") {
 KJ_TEST("DELETE with LIMIT") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
-  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
   db.run(R"(
     CREATE TABLE things (
@@ -789,7 +816,8 @@ KJ_TEST("DELETE with LIMIT") {
 KJ_TEST("reset database") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
-  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
   db.run("PRAGMA journal_mode=WAL;");
 
@@ -851,8 +879,8 @@ KJ_TEST("SQLite observer addQueryStats") {
   SqliteDatabase::Vfs vfs(*dir);
   TestSqliteObserver sqliteObserver = TestSqliteObserver();
   TestQueryStatsRegulator regulator;
-  SqliteDatabase db(
-      vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY, sqliteObserver);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024, sqliteObserver);
 
   db.run(R"(
     CREATE TABLE things (
@@ -942,8 +970,8 @@ KJ_TEST("SQLite observer reportQueryEvent") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
   TestSqliteObserver sqliteObserver;
-  SqliteDatabase db(
-      vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY, sqliteObserver);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024, sqliteObserver);
 
   db.run("PRAGMA journal_mode=WAL;");
 
@@ -993,7 +1021,8 @@ KJ_TEST("SQLite observer reportQueryEvent") {
 KJ_TEST("SQLite failed statement reset") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
-  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
   db.run(R"(
     CREATE TABLE things (
@@ -1030,7 +1059,8 @@ KJ_TEST("SQLite extended error codes in messages") {
   // primary error code.
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
-  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
   db.run(R"(
     CREATE TABLE things (
@@ -1093,7 +1123,8 @@ class MockRollbackCallback {
 KJ_TEST("SQLite onRollback") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
-  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
   // With no transactions open, the callback is dropped immediately.
   {
@@ -1216,7 +1247,8 @@ KJ_TEST("SQLite onRollback") {
 KJ_TEST("SQLite prepareMulti") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
-  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
   auto stmt = db.prepareMulti(SqliteDatabase::TRUSTED, kj::str(R"(
     CREATE TABLE IF NOT EXISTS things (
@@ -1315,7 +1347,8 @@ KJ_TEST("SQLite prepareMulti with failure") {
 
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
-  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
   auto stmt = db.prepareMulti(SqliteDatabase::TRUSTED, kj::str(R"(
     CREATE TABLE IF NOT EXISTS things (
@@ -1346,7 +1379,8 @@ KJ_TEST("SQLite prepareMulti w/BEGIN TRANSACTION") {
 
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
-  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
   auto stmt = db.prepareMulti(SqliteDatabase::TRUSTED, kj::str(R"(
     CREATE TABLE IF NOT EXISTS things (
@@ -1632,7 +1666,8 @@ KJ_TEST("SQLite memory metering tracks allocations correctly") {
 KJ_TEST("I/O exceptions pass through SQLite") {
   auto dir = kj::atomicRefcounted<ErrorInjectableDirectory>();
   SqliteDatabase::Vfs vfs(*dir);
-  SqliteDatabase db(vfs, kj::Path({"db"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase db(vfs, kj::Path({"db"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
   db.run({.regulator = SqliteDatabase::TRUSTED}, kj::str(R"(
     CREATE TABLE IF NOT EXISTS things (
@@ -1656,7 +1691,8 @@ void testCriticalError(const char* expectedErrorMessage,
     kj::Function<void(SqliteDatabase&, SqliteDatabase::Vfs& vfs)> triggerErrorFn) {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
-  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
   // Create a tracker to verify our callback is called
   bool criticalErrorCallbackCalled = false;
@@ -1681,7 +1717,8 @@ void testCriticalError(const char* expectedErrorMessage,
 KJ_TEST("SQLite critical error handling for SQLITE_IOERR") {
   auto dir = kj::atomicRefcounted<ErrorInjectableDirectory>();
   SqliteDatabase::Vfs vfs(*dir);
-  SqliteDatabase db(vfs, kj::Path({"db"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase db(vfs, kj::Path({"db"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/512 * 1024 * 1024);
 
   // Create a tracker to verify our callback is called
   bool criticalErrorCallbackCalled = false;
