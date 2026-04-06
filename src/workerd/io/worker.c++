@@ -3855,7 +3855,12 @@ Worker::Actor::Actor(const Worker& worker,
       // const_cast OK because we're just storing the pointer and will only use this under lock.
       impl->classInstance = const_cast<ActorClassInfo*>(&cls);
     } else {
-      kj::throwFatalException(KJ_EXCEPTION(FAILED, "broken.ignored; no such actor class", c));
+      auto e = KJ_EXCEPTION(FAILED, "broken.ignored; no such actor class", c);
+      // Tag as user error so that in-process callers (e.g. isAlarmFailureUserError) can
+      // recognise this as a permanent failure. Note: this detail is lost over Cap'n Proto RPC,
+      // so the alarm-manager also pattern-matches the description string.
+      e.setDetail(jsg::EXCEPTION_IS_USER_ERROR, kj::heapArray<kj::byte>(0));
+      kj::throwFatalException(kj::mv(e));
     }
   } else {
     impl->classInstance = Impl::NoClass();
