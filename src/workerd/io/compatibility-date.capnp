@@ -1505,8 +1505,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   noResizableArrayBufferInBlob @173 :Bool
     $compatEnableFlag("no_resizable_array_buffer_in_blob")
-    $compatDisableFlag("resizable_array_buffer_in_blob")
-    $experimental;
+    $compatDisableFlag("resizable_array_buffer_in_blob");
   # When enabled, creating a Blob with a resizable ArrayBuffer will throw a TypeError, matching
   # expected spec behavior.
 }

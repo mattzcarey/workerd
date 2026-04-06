@@ -6,6 +6,7 @@
 
 #include <workerd/api/streams/readable-source.h>
 #include <workerd/api/streams/readable.h>
+#include <workerd/io/features.h>
 #include <workerd/io/observer.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
@@ -20,23 +21,31 @@ kj::Maybe<jsg::JsBufferSource> concat(jsg::Lock& js, jsg::Optional<Blob::Bits> m
     return kj::none;
   }
 
+  auto rejectResizable = FeatureFlags::get(js).getNoResizableArrayBufferInBlob();
   auto maxBlobSize = Worker::Isolate::from(js).getLimitEnforcer().getBlobSizeLimit();
   static constexpr int kMaxInt KJ_UNUSED = kj::maxValue;
   KJ_DASSERT(maxBlobSize <= kMaxInt, "Blob size limit exceeds int range");
   size_t size = 0;
+  kj::SmallArray<size_t, 8> cachedPartSizes(bits.size());
+  size_t index = 0;
   for (auto& part: bits) {
     size_t partSize = 0;
     KJ_SWITCH_ONEOF(part) {
-      KJ_CASE_ONEOF(bytes, kj::Array<const byte>) {
+      KJ_CASE_ONEOF(bytes, jsg::JsBufferSource) {
+        if (rejectResizable) {
+          JSG_REQUIRE(
+              !bytes.isResizable(), TypeError, "Cannot create a Blob with a resizable ArrayBuffer");
+        }
         partSize = bytes.size();
       }
       KJ_CASE_ONEOF(text, kj::String) {
-        partSize = text.size();
+        partSize = text.asBytes().size();
       }
       KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
         partSize = blob->getData().size();
       }
     }
+    cachedPartSizes[index++] = partSize;
 
     // We can skip the remaining checks if the part is empty.
     if (partSize == 0) continue;
@@ -66,16 +75,26 @@ kj::Maybe<jsg::JsBufferSource> concat(jsg::Lock& js, jsg::Optional<Blob::Bits> m
 
   auto view = u8.asArrayPtr();
 
+  index = 0;
   for (auto& part: bits) {
     KJ_SWITCH_ONEOF(part) {
-      KJ_CASE_ONEOF(bytes, kj::Array<const byte>) {
-        if (bytes.size() == 0) continue;
-        KJ_ASSERT(view.size() >= bytes.size());
-        view.first(bytes.size()).copyFrom(bytes);
-        view = view.slice(bytes.size());
+      KJ_CASE_ONEOF(bytes, jsg::JsBufferSource) {
+        size_t cachedSize = cachedPartSizes[index++];
+        // If the ArrayBuffer was resized larger, we'll ignore the additional bytes.
+        // If the ArrayBuffer was resized smaller, we'll copy up to the current size.
+        // In either case, data is packed tightly — any unused space from shrunk
+        // buffers ends up as zeros at the end of the output rather than as gaps
+        // in the middle.
+        size_t toCopy = kj::min(bytes.size(), cachedSize);
+        if (toCopy > 0) {
+          KJ_ASSERT(view.size() >= toCopy);
+          view.first(toCopy).copyFrom(bytes.asArrayPtr().first(toCopy));
+        }
+        view = view.slice(toCopy);
       }
       KJ_CASE_ONEOF(text, kj::String) {
         auto byteLength = text.asBytes().size();
+        KJ_ASSERT(byteLength == cachedPartSizes[index++]);
         if (byteLength == 0) continue;
         KJ_ASSERT(view.size() >= byteLength);
         view.first(byteLength).copyFrom(text.asBytes());
@@ -83,6 +102,7 @@ kj::Maybe<jsg::JsBufferSource> concat(jsg::Lock& js, jsg::Optional<Blob::Bits> m
       }
       KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
         auto data = blob->getData();
+        KJ_ASSERT(data.size() == cachedPartSizes[index++]);
         if (data.size() == 0) continue;
         KJ_ASSERT(view.size() >= data.size());
         view.first(data.size()).copyFrom(data);
@@ -91,8 +111,18 @@ kj::Maybe<jsg::JsBufferSource> concat(jsg::Lock& js, jsg::Optional<Blob::Bits> m
     }
   }
 
-  KJ_ASSERT(view == nullptr);
+  // view.size() will be non-zero if one or more resizable ArrayBuffers were shrunk
+  // between the size-computation pass and the copy pass. In that case, create a
+  // trimmed view over just the bytes that were actually written.
+  size_t bytesWritten = size - view.size();
+  if (bytesWritten == 0) {
+    return kj::none;
+  }
+  if (bytesWritten < size) {
+    return jsg::JsBufferSource(u8.slice(js, bytesWritten));
+  }
 
+  KJ_ASSERT(view == nullptr);
   return jsg::JsBufferSource(u8);
 }
 
@@ -129,7 +159,12 @@ Blob::Blob(kj::Array<byte> data, kj::String type)
 Blob::Blob(jsg::Lock& js, jsg::JsBufferSource data, kj::String type)
     : ownData(data.addRef(js)),
       data(data.asArrayPtr()),
-      type(kj::mv(type)) {}
+      type(kj::mv(type)) {
+  if (FeatureFlags::get(js).getNoResizableArrayBufferInBlob()) {
+    JSG_REQUIRE(
+        !data.isResizable(), TypeError, "Cannot create a Blob with a resizable ArrayBuffer");
+  }
+}
 
 Blob::Blob(jsg::Ref<Blob> parent, kj::ArrayPtr<const byte> data, kj::String type)
     : ownData(kj::mv(parent)),
