@@ -4998,8 +4998,7 @@ KJ_TEST("Server: Durable Object facets") {
     services = [
       ( name = "hello",
         worker = (
-          compatibilityDate = "2025-04-01",
-          compatibilityFlags = ["experimental","enable_ctx_exports"],
+          compatibilityDate = "2026-04-01",
           modules = [
             ( name = "main.js",
               esModule =

@@ -673,10 +673,7 @@ class DurableObjectState: public jsg::Object {
     JSG_LAZY_INSTANCE_PROPERTY(id, getId);
     JSG_LAZY_INSTANCE_PROPERTY(storage, getStorage);
     JSG_LAZY_INSTANCE_PROPERTY(container, getContainer);
-    if (flags.getWorkerdExperimental()) {
-      // Experimental new API, details may change!
-      JSG_LAZY_INSTANCE_PROPERTY(facets, getFacets);
-    }
+    JSG_LAZY_INSTANCE_PROPERTY(facets, getFacets);
     if (flags.getEnableVersionApi()) {
       JSG_LAZY_INSTANCE_PROPERTY(version, getVersion);
     }

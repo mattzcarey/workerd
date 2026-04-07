@@ -366,8 +366,6 @@ export class FacetTestActor extends DurableObject {
     let worker = this.env.loader.get('facets', () => {
       return {
         compatibilityDate: '2025-01-01',
-        compatibilityFlags: ['experimental'],
-        allowExperimental: true,
         mainModule: 'foo.js',
         modules: {
           'foo.js': `
@@ -653,7 +651,6 @@ export let compatDateFlags = {
       return {
         compatibilityDate,
         compatibilityFlags,
-        allowExperimental: true,
         mainModule: 'main.js',
         modules: {
           'main.js': `
@@ -751,7 +748,6 @@ export let ctxExports = {
         compatibilityDate: '2025-01-01',
         compatibilityFlags: ['enable_ctx_exports'],
         mainModule: 'foo.js',
-        allowExperimental: true,
         modules: {
           'foo.js': `
             import {WorkerEntrypoint} from "cloudflare:workers";

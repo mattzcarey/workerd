@@ -34,23 +34,14 @@ class WorkerStub: public jsg::Object {
 
   JSG_RESOURCE_TYPE(WorkerStub, CompatibilityFlags::Reader flags) {
     JSG_METHOD(getEntrypoint);
+    JSG_METHOD(getDurableObjectClass);
 
-    if (flags.getWorkerdExperimental()) {
-      // Facets are experimental.
-      JSG_METHOD(getDurableObjectClass);
-
-      JSG_TS_OVERRIDE({
-        getEntrypoint<T extends Rpc.WorkerEntrypointBranded | undefined>(
-            name?: string, options?: WorkerStubEntrypointOptions): Fetcher<T>;
-        getDurableObjectClass<T extends Rpc.DurableObjectBranded | undefined>(
-            name?: string, options?: WorkerStubEntrypointOptions): DurableObjectClass<T>;
-      });
-    } else {
-      JSG_TS_OVERRIDE({
-        getEntrypoint<T extends Rpc.WorkerEntrypointBranded | undefined>(
-            name?: string, options?: WorkerStubEntrypointOptions): Fetcher<T>;
-      });
-    }
+    JSG_TS_OVERRIDE({
+      getEntrypoint<T extends Rpc.WorkerEntrypointBranded | undefined>(
+          name?: string, options?: WorkerStubEntrypointOptions): Fetcher<T>;
+      getDurableObjectClass<T extends Rpc.DurableObjectBranded | undefined>(
+          name?: string, options?: WorkerStubEntrypointOptions): DurableObjectClass<T>;
+    });
   }
 
  private:
